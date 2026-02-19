@@ -19,6 +19,7 @@ import httpx
 
 from guidellm.backends.backend import Backend
 from guidellm.backends.openai.request_handlers import OpenAIRequestHandlerFactory
+from guidellm.backends.openai.selector import ModelSelector
 from guidellm.schemas import (
     GenerationRequest,
     GenerationRequestArguments,
@@ -28,6 +29,7 @@ from guidellm.schemas import (
 
 __all__ = [
     "OpenAIHTTPBackend",
+    "ModelSelector",
 ]
 
 
@@ -96,6 +98,7 @@ class OpenAIHTTPBackend(Backend):
         extras: dict[str, Any] | GenerationRequestArguments | None = None,
         max_tokens: int | None = None,
         max_completion_tokens: int | None = None,
+        model_selector: ModelSelector | dict[str, Any] | None = None,
     ):
         """
         Initialize OpenAI HTTP backend with server configuration.
@@ -151,6 +154,15 @@ class OpenAIHTTPBackend(Backend):
             else extras
         )
         self.max_tokens: int | None = max_tokens or max_completion_tokens
+        self.model_selector: ModelSelector | None = (
+            ModelSelector(**model_selector)
+            if isinstance(model_selector, dict)
+            else model_selector
+        )
+        # Disable single-model caching when multi-model mode is active so that
+        # default_model() is called fresh on every request.
+        if self.model_selector and self.model_selector.is_multi:
+            self.model = ""
 
         # Runtime state
         self._in_process = False
@@ -163,7 +175,7 @@ class OpenAIHTTPBackend(Backend):
 
         :return: Dictionary containing backend configuration details
         """
-        return {
+        info: dict[str, Any] = {
             "target": self.target,
             "model": self.model,
             "timeout": self.timeout,
@@ -175,6 +187,12 @@ class OpenAIHTTPBackend(Backend):
             "validate_backend": self.validate_backend,
             # Auth token excluded for security
         }
+        if self.model_selector and self.model_selector.is_multi:
+            info["model_selector"] = {
+                "models": self.model_selector.resolved_models,
+                "weights": self.model_selector.resolved_weights,
+            }
+        return info
 
     async def process_startup(self):
         """
@@ -203,6 +221,10 @@ class OpenAIHTTPBackend(Backend):
             ),
         )
         self._in_process = True
+
+        if self.model_selector and self.model_selector.is_multi:
+            available = await self.available_models()
+            self.model_selector.resolve(available)
 
     async def process_shutdown(self):
         """
@@ -263,10 +285,19 @@ class OpenAIHTTPBackend(Backend):
 
     async def default_model(self) -> str:
         """
-        Get the default model for this backend.
+        Get the model to use for the next request.
 
-        :return: Model name or None if no model is available
+        When a :class:`ModelSelector` is configured, returns a model chosen
+        according to the selector's weighted distribution (called fresh on
+        every request). Otherwise falls back to the standard single-model
+        behaviour: return ``self.model``, discovering it from the server if
+        not yet set.
+
+        :return: Model name to use for the request.
         """
+        if self.model_selector and self.model_selector.is_multi:
+            return self.model_selector.select()
+
         if self.model or not self._in_process:
             return self.model
 
