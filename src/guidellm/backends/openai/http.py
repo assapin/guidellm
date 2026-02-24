@@ -12,11 +12,13 @@ from __future__ import annotations
 
 import asyncio
 import time
+import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
 
+from guidellm.logger import logger
 from guidellm.backends.backend import Backend
 from guidellm.backends.openai.request_handlers import OpenAIRequestHandlerFactory
 from guidellm.backends.openai.selector import ModelSelector
@@ -99,6 +101,7 @@ class OpenAIHTTPBackend(Backend):
         max_tokens: int | None = None,
         max_completion_tokens: int | None = None,
         model_selector: ModelSelector | dict[str, Any] | None = None,
+        prompt_transform: str | None = None,
     ):
         """
         Initialize OpenAI HTTP backend with server configuration.
@@ -163,6 +166,8 @@ class OpenAIHTTPBackend(Backend):
         # default_model() is called fresh on every request.
         if self.model_selector and self.model_selector.is_multi:
             self.model = ""
+
+        self.prompt_transform: str | None = prompt_transform
 
         # Runtime state
         self._in_process = False
@@ -337,6 +342,13 @@ class OpenAIHTTPBackend(Backend):
         request_handler = OpenAIRequestHandlerFactory.create(
             self.request_type, handler_overrides=self.request_handlers
         )
+
+        if self.prompt_transform == "random_uuid_prefix":
+            cols = request.columns
+            if "text_column" in cols and cols["text_column"]:
+                new_text = [f"[{uuid.uuid4()}] {cols['text_column'][0]}"] + list(cols["text_column"][1:])
+                request = request.model_copy(update={"columns": {**cols, "text_column": new_text}})
+
         arguments: GenerationRequestArguments = request_handler.format(
             request,
             model=(await self.default_model()),
@@ -344,6 +356,8 @@ class OpenAIHTTPBackend(Backend):
             extras=self.extras,
             max_tokens=self.max_tokens,
         )
+
+        logger.debug("request payload: {}", arguments.body)
 
         request_url = f"{self.target}/{request_path}"
         request_files = (

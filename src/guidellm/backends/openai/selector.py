@@ -9,6 +9,7 @@ models (e.g. LoRA adapters) according to a configurable weighted distribution.
 from __future__ import annotations
 
 import random
+from typing import Literal
 
 from pydantic import Field, PrivateAttr
 
@@ -76,10 +77,28 @@ class ModelSelector(StandardBaseModel):
             "Omit for uniform distribution."
         ),
     )
+    type: Literal["weighted", "round_robin"] = Field(
+        default="weighted",
+        description=(
+            "Selection strategy. 'weighted' uses random.choices with the computed "
+            "weight distribution. 'round_robin' cycles through resolved models "
+            "deterministically using a stateful counter."
+        ),
+    )
+    loras_only: bool = Field(
+        default=False,
+        description=(
+            "When True, exclude base models from the dynamically discovered model "
+            "list. Base models are identified by containing a '/' in their name "
+            "(HuggingFace org/model format). Has no effect when 'models' is "
+            "provided explicitly."
+        ),
+    )
 
     # Runtime state — populated by resolve(), not part of the schema
     _resolved: list[str] = PrivateAttr(default_factory=list)
     _weights: list[float] = PrivateAttr(default_factory=list)
+    _counter: int = PrivateAttr(default=0)
 
     @property
     def is_multi(self) -> bool:
@@ -98,21 +117,28 @@ class ModelSelector(StandardBaseModel):
         """
         if self.models is not None:
             self._resolved = list(self.models)
-        elif self.n_models == -1:
-            self._resolved = list(available)
         else:
-            self._resolved = list(available[: self.n_models])
+            pool = [m for m in available if "/" not in m] if self.loras_only else list(available)
+            self._resolved = pool if self.n_models == -1 else pool[: self.n_models]
 
         self._weights = _compute_weights(self._resolved, self.distribution or [])
 
     def select(self) -> str:
         """
-        Pick a model according to the configured weighted distribution.
+        Pick a model according to the configured selection strategy.
+
+        ``weighted``: draws randomly using the computed weight distribution.
+        ``round_robin``: cycles through resolved models in order using a
+        stateful counter (deterministic, evenly distributed over time).
 
         :return: A model name, or ``""`` if no models have been resolved yet.
         """
         if not self._resolved:
             return ""
+        if self.type == "round_robin":
+            model = self._resolved[self._counter % len(self._resolved)]
+            self._counter += 1
+            return model
         return random.choices(self._resolved, weights=self._weights, k=1)[0]
 
     @property
