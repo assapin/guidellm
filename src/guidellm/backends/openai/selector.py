@@ -88,9 +88,10 @@ class ModelSelector(StandardBaseModel):
     loras_only: bool = Field(
         default=False,
         description=(
-            "When True, filter the available model list to LoRA adapters only "
-            "(models whose name does not contain '/'). Excludes base models such "
-            "as 'Qwen/Qwen3-4B' which vLLM exposes alongside loaded adapters."
+            "When True, exclude base models from the dynamically discovered model "
+            "list. Base models are identified by containing a '/' in their name "
+            "(HuggingFace org/model format). Has no effect when 'models' is "
+            "provided explicitly."
         ),
     )
 

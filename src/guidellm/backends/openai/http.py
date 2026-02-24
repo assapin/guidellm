@@ -18,6 +18,7 @@ from typing import Any
 
 import httpx
 
+from guidellm.logger import logger
 from guidellm.backends.backend import Backend
 from guidellm.backends.openai.request_handlers import OpenAIRequestHandlerFactory
 from guidellm.backends.openai.selector import ModelSelector
@@ -361,6 +362,8 @@ class OpenAIHTTPBackend(Backend):
             extras=self.extras,
             max_tokens=self.max_tokens,
         )
+
+        logger.debug("request payload: {}", arguments.body)
 
         request_url = f"{self.target}/{request_path}"
         request_files = (
