@@ -71,6 +71,7 @@ dependencies = [
     "uvloop>=0.18",
     "torch",
     "more-itertools>=10.8.0",
+    "botocore>=1.42.56",
 ]
 
 [project.optional-dependencies]
