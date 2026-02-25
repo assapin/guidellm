@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -99,6 +100,8 @@ class OpenAIHTTPBackend(Backend):
         max_tokens: int | None = None,
         max_completion_tokens: int | None = None,
         model_selector: ModelSelector | dict[str, Any] | None = None,
+        prompt_transform: str | None = None,
+        aws_sigv4: dict[str, Any] | bool | None = None,
     ):
         """
         Initialize OpenAI HTTP backend with server configuration.
@@ -113,6 +116,10 @@ class OpenAIHTTPBackend(Backend):
         :param follow_redirects: Follow HTTP redirects automatically
         :param verify: Enable SSL certificate verification
         :param validate_backend: Backend validation configuration
+        :param aws_sigv4: Enable AWS SigV4 request signing (for API Gateway). Pass
+            ``True`` for defaults or a dict with optional keys ``region``
+            (default ``"us-east-1"``), ``profile`` (default: env/instance-role),
+            and ``service`` (default ``"execute-api"``).
         """
         super().__init__(type_="openai_http")
 
@@ -163,6 +170,8 @@ class OpenAIHTTPBackend(Backend):
         # default_model() is called fresh on every request.
         if self.model_selector and self.model_selector.is_multi:
             self.model = ""
+        self.prompt_transform: str | None = prompt_transform
+        self.aws_sigv4: dict[str, Any] | bool | None = aws_sigv4
 
         # Runtime state
         self._in_process = False
@@ -219,6 +228,7 @@ class OpenAIHTTPBackend(Backend):
                 max_keepalive_connections=None,
                 keepalive_expiry=5.0,  # default
             ),
+            **({"event_hooks": self._build_sigv4_hooks()} if self.aws_sigv4 else {}),
         )
         self._in_process = True
 
@@ -337,6 +347,13 @@ class OpenAIHTTPBackend(Backend):
         request_handler = OpenAIRequestHandlerFactory.create(
             self.request_type, handler_overrides=self.request_handlers
         )
+
+        if self.prompt_transform == "random_uuid_prefix":
+            cols = request.columns
+            if "text_column" in cols and cols["text_column"]:
+                new_text = [f"[{uuid.uuid4()}] {cols['text_column'][0]}"] + list(cols["text_column"][1:])
+                request = request.model_copy(update={"columns": {**cols, "text_column": new_text}})
+
         arguments: GenerationRequestArguments = request_handler.format(
             request,
             model=(await self.default_model()),
@@ -442,6 +459,48 @@ class OpenAIHTTPBackend(Backend):
             headers = {**headers, **existing_headers}
 
         return headers or None
+
+    def _build_sigv4_hooks(self) -> dict:
+        """
+        Build an httpx event-hooks dict that signs every request with AWS SigV4.
+
+        Reads config from ``self.aws_sigv4`` (dict or ``True`` for defaults).
+        Mirrors the ``make_sigv4_hooks`` helper in lora_manager's inference_client.
+        """
+        from threading import Lock
+
+        import botocore.session
+        from botocore.auth import SigV4Auth
+        from botocore.awsrequest import AWSRequest
+
+        cfg = self.aws_sigv4 if isinstance(self.aws_sigv4, dict) else {}
+        region = cfg.get("region", "us-east-1")
+        profile = cfg.get("profile")
+        service = cfg.get("service", "execute-api")
+
+        session = botocore.session.Session()
+        if profile:
+            session.set_config_variable("profile", profile)
+        credentials = session.get_credentials().get_frozen_credentials()
+        lock = Lock()
+
+        def _sign(request: httpx.Request) -> None:
+            # Sign only the Host header — httpx may add other headers (accept-encoding,
+            # connection, etc.) after signing, which would invalidate the signature.
+            aws_request = AWSRequest(
+                method=request.method,
+                url=str(request.url),
+                headers={"Host": request.url.host},
+                data=request.content,
+            )
+            with lock:
+                SigV4Auth(credentials, service, region).add_auth(aws_request)
+            request.headers.update(dict(aws_request.headers))
+
+        async def sign_request(request: httpx.Request) -> None:
+            _sign(request)
+
+        return {"request": [sign_request]}
 
     def _resolve_validate_kwargs(
         self, validate_backend: bool | str | dict[str, Any]
