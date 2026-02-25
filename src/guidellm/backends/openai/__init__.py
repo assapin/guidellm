@@ -6,10 +6,12 @@ from .request_handlers import (
     OpenAIRequestHandlerFactory,
     TextCompletionsRequestHandler,
 )
+from .selector import ModelSelector
 
 __all__ = [
     "AudioRequestHandler",
     "ChatCompletionsRequestHandler",
+    "ModelSelector",
     "OpenAIHTTPBackend",
     "OpenAIRequestHandler",
     "OpenAIRequestHandlerFactory",

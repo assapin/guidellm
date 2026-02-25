@@ -13,6 +13,7 @@ from .backend import Backend, BackendType
 from .openai import (
     AudioRequestHandler,
     ChatCompletionsRequestHandler,
+    ModelSelector,
     OpenAIHTTPBackend,
     OpenAIRequestHandler,
     OpenAIRequestHandlerFactory,
@@ -24,6 +25,7 @@ __all__ = [
     "Backend",
     "BackendType",
     "ChatCompletionsRequestHandler",
+    "ModelSelector",
     "OpenAIHTTPBackend",
     "OpenAIRequestHandler",
     "OpenAIRequestHandlerFactory",
