@@ -275,10 +275,12 @@ def _filter_duplicate_percentiles(percentiles: dict[str, float]) -> dict[str, fl
 
 def _inject_data(js_data: dict[str, str], html: str) -> str:
     """
-    Inject JavaScript data into HTML head section.
+    Inject JavaScript data into HTML head section and RSC payload.
 
     Replaces placeholder strings in the HTML head section with actual JavaScript
-    code containing benchmark data. Returns original HTML if no head section found.
+    code containing benchmark data. Also replaces placeholders in the Next.js RSC
+    __next_f payload (outside </html>) with JS-string-escaped versions so that
+    React hydration does not overwrite the injected data.
 
     :param js_data: Dictionary mapping placeholder strings to JavaScript code
     :param html: HTML template content
@@ -295,7 +297,22 @@ def _inject_data(js_data: dict[str, str], html: str) -> str:
         head_content = head_content.replace(placeholder, script)
 
     new_head = f"<head>{head_content}</head>"
-    return html[: head_match.start()] + new_head + html[head_match.end() :]
+    prefix = html[: head_match.start()]
+    suffix = html[head_match.end() :]
+
+    # The Next.js RSC __next_f payload lives after </html> and also contains the
+    # data placeholders inside a JS string literal.  Replace them there too,
+    # escaping the values so the JS string stays syntactically valid.
+    for placeholder, script in js_data.items():
+        js_escaped = (
+            script.replace("\\", "\\\\")
+            .replace('"', '\\"')
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+        )
+        suffix = suffix.replace(placeholder, js_escaped)
+
+    return prefix + new_head + suffix
 
 
 def _build_ui_data(
