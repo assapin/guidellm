@@ -233,6 +233,10 @@ def _create_html_report(js_data: dict[str, str], output_path: Path) -> Path:
     :return: Path to the saved report file
     """
     html_content = load_text(settings.report_generation.source)
+    html_content = html_content.replace(
+        "https://blog.vllm.ai/guidellm",
+        "https://cdn.jsdelivr.net/gh/vllm-project/guidellm@gh-pages",
+    )
     report_content = _inject_data(js_data, html_content)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
