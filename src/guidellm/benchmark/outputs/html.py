@@ -233,6 +233,10 @@ def _create_html_report(js_data: dict[str, str], output_path: Path) -> Path:
     :return: Path to the saved report file
     """
     html_content = load_text(settings.report_generation.source)
+    html_content = html_content.replace(
+        "https://blog.vllm.ai/guidellm",
+        "https://cdn.jsdelivr.net/gh/vllm-project/guidellm@gh-pages",
+    )
     report_content = _inject_data(js_data, html_content)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -295,22 +299,7 @@ def _inject_data(js_data: dict[str, str], html: str) -> str:
         head_content = head_content.replace(placeholder, script)
 
     new_head = f"<head>{head_content}</head>"
-    prefix = html[: head_match.start()]
-    suffix = html[head_match.end() :]
-
-    # The Next.js RSC __next_f payload lives after </html> and also embeds the
-    # placeholder strings inside JSON string literals. Replace them there too,
-    # escaping so the surrounding JS string stays valid.
-    for placeholder, script in js_data.items():
-        js_escaped = (
-            script.replace("\\", "\\\\")
-            .replace('"', '\\"')
-            .replace("\n", "\\n")
-            .replace("\r", "\\r")
-        )
-        suffix = suffix.replace(placeholder, js_escaped)
-
-    return prefix + new_head + suffix
+    return html[: head_match.start()] + new_head + html[head_match.end() :]
 
 
 def _build_ui_data(
