@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.resources
 import json
 from collections.abc import Sequence
 from enum import Enum
@@ -142,7 +143,17 @@ class Settings(BaseSettings):
     @classmethod
     def set_default_source(cls, values):
         if not values.report_generation.source:
-            values.report_generation.source = ENV_REPORT_MAPPING.get(values.env)
+            url = ENV_REPORT_MAPPING.get(values.env)
+            if url and values.env == Environment.LOCAL:
+                values.report_generation.source = url
+            else:
+                # Use bundled template — no external dependency at report time
+                bundled = (
+                    importlib.resources.files(
+                        "guidellm.benchmark.outputs.templates"
+                    ).joinpath("report.html")
+                )
+                values.report_generation.source = str(bundled)
         return values
 
     def generate_env_file(self) -> str:
