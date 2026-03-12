@@ -225,7 +225,8 @@ def _create_html_report(js_data: dict[str, str], output_path: Path) -> Path:
     """
     Create HTML report by injecting JavaScript data into template.
 
-    Loads the HTML template, injects JavaScript data into the head section, and
+    Loads the HTML template, injects JavaScript data into the head section,
+    inlines all external JS chunks so the file works without a server, and
     writes the final report to the specified output path.
 
     :param js_data: Dictionary mapping placeholder strings to JavaScript code
@@ -234,10 +235,45 @@ def _create_html_report(js_data: dict[str, str], output_path: Path) -> Path:
     """
     html_content = load_text(settings.report_generation.source)
     report_content = _inject_data(js_data, html_content)
+    report_content = _inline_scripts(report_content)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(report_content)
     return output_path
+
+
+def _inline_scripts(html: str) -> str:
+    """
+    Replace external <script src="..."> tags with inline <script> blocks.
+
+    Fetches each CDN-hosted JS chunk and embeds it directly so the report is
+    fully self-contained and works when opened as a local file.  Any chunk
+    that fails to fetch is left as an external tag.
+
+    :param html: HTML content with external script tags
+    :return: HTML with scripts inlined
+    """
+    import httpx
+
+    def _fetch_and_inline(match: re.Match) -> str:
+        url = match.group(1)
+        attrs = match.group(0)
+        # Skip noModule scripts (polyfills for legacy browsers — not needed in Chrome)
+        if "noModule" in attrs or "nomodule" in attrs:
+            return ""
+        try:
+            response = httpx.get(url, timeout=15, follow_redirects=True)
+            response.raise_for_status()
+            return f"<script>{response.text}</script>"
+        except Exception:
+            logger.warning(f"Failed to inline script {url}, leaving as external tag")
+            return match.group(0)
+
+    return re.sub(
+        r'<script\s[^>]*src="(https?://[^"]+)"[^>]*></script>',
+        _fetch_and_inline,
+        html,
+    )
 
 
 def _filter_duplicate_percentiles(percentiles: dict[str, float]) -> dict[str, float]:
