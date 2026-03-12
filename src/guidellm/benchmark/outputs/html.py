@@ -233,10 +233,29 @@ def _create_html_report(js_data: dict[str, str], output_path: Path) -> Path:
     :return: Path to the saved report file
     """
     html_content = load_text(settings.report_generation.source)
-    html_content = html_content.replace(
-        "https://blog.vllm.ai/guidellm",
-        "https://cdn.jsdelivr.net/gh/vllm-project/guidellm@gh-pages",
-    )
+
+    # blog.vllm.ai now 301-redirects to vllm.ai which 404s for all static assets.
+    # The webpack bundle has the CDN URL hardcoded as d.p (public path), so we
+    # must inline it with the URL replaced — rewriting the HTML src= tags is not
+    # enough because webpack uses d.p to dynamically load framework/page chunks.
+    cdn_old = "https://blog.vllm.ai/guidellm"
+    cdn_new = "https://cdn.jsdelivr.net/gh/vllm-project/guidellm@gh-pages"
+    html_content = html_content.replace(cdn_old, cdn_new)
+
+    import re as _re
+    def _inline_webpack(html: str) -> str:
+        def _replace(m: _re.Match) -> str:
+            src = m.group(1).replace(cdn_old, cdn_new)
+            if "webpack-" not in src:
+                return m.group(0).replace(cdn_old, cdn_new)
+            try:
+                js = load_text(src).replace(cdn_old, cdn_new)
+                return f"<script>{js}</script>"
+            except Exception:
+                return m.group(0).replace(cdn_old, cdn_new)
+        return _re.sub(r'<script\s+src="([^"]+)"[^>]*></script>', _replace, html)
+
+    html_content = _inline_webpack(html_content)
     report_content = _inject_data(js_data, html_content)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
