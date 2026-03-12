@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.resources
 import json
+from pathlib import Path
 from collections.abc import Sequence
 from enum import Enum
 from typing import Literal
@@ -148,10 +149,14 @@ class Settings(BaseSettings):
                 values.report_generation.source = url
             else:
                 # Use bundled template — no external dependency at report time
+                # Use Path(__file__) to avoid triggering a circular import via
+                # importlib.resources.files("guidellm.benchmark.outputs.templates")
                 bundled = (
-                    importlib.resources.files(
-                        "guidellm.benchmark.outputs.templates"
-                    ).joinpath("report.html")
+                    Path(__file__).parent
+                    / "benchmark"
+                    / "outputs"
+                    / "templates"
+                    / "report.html"
                 )
                 values.report_generation.source = str(bundled)
         return values
