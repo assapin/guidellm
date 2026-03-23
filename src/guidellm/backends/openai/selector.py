@@ -94,6 +94,14 @@ class ModelSelector(StandardBaseModel):
             "provided explicitly."
         ),
     )
+    lora_header: str | None = Field(
+        default=None,
+        description=(
+            "HTTP header name to inject with the selected LoRA/model name on each "
+            "request. When set (e.g. 'X-Lora-Name'), every request gets a header "
+            "'{lora_header}: <selected_model_name>'. Has no effect when empty or None."
+        ),
+    )
 
     # Runtime state — populated by resolve(), not part of the schema
     _resolved: list[str] = PrivateAttr(default_factory=list)

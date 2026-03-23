@@ -355,9 +355,10 @@ class OpenAIHTTPBackend(Backend):
                 new_text = [f"[{uuid.uuid4()}] {cols['text_column'][0]}"] + list(cols["text_column"][1:])
                 request = request.model_copy(update={"columns": {**cols, "text_column": new_text}})
 
+        selected_model = await self.default_model()
         arguments: GenerationRequestArguments = request_handler.format(
             request,
-            model=(await self.default_model()),
+            model=selected_model,
             stream=self.stream,
             extras=self.extras,
             max_tokens=self.max_tokens,
@@ -383,7 +384,7 @@ class OpenAIHTTPBackend(Backend):
                 arguments.method or "POST",
                 request_url,
                 params=arguments.params,
-                headers=self._build_headers(arguments.headers),
+                headers=self._build_headers(arguments.headers, lora_model=selected_model),
                 json=request_json,
                 data=request_data,
                 files=request_files,
@@ -404,7 +405,7 @@ class OpenAIHTTPBackend(Backend):
                 arguments.method or "POST",
                 request_url,
                 params=arguments.params,
-                headers=self._build_headers(arguments.headers),
+                headers=self._build_headers(arguments.headers, lora_model=selected_model),
                 json=request_json,
                 data=request_data,
                 files=request_files,
@@ -441,15 +442,20 @@ class OpenAIHTTPBackend(Backend):
             raise err
 
     def _build_headers(
-        self, existing_headers: dict[str, str] | None = None
+        self,
+        existing_headers: dict[str, str] | None = None,
+        lora_model: str | None = None,
     ) -> dict[str, str] | None:
         """
         Build headers dictionary with bearer token authentication.
 
         Merges the Authorization bearer token header (if api_key is set) with any
         existing headers. User-provided headers take precedence over the bearer token.
+        When model_selector.lora_header is set and lora_model is provided, injects
+        that header with the selected model name.
 
         :param existing_headers: Optional existing headers to merge with
+        :param lora_model: The model name selected for this request (used with lora_header)
         :return: Dictionary of headers with bearer token included if api_key is set
         """
         headers: dict[str, str] = {}
@@ -457,6 +463,14 @@ class OpenAIHTTPBackend(Backend):
         # Add bearer token if api_key is set
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
+
+        # Inject lora header if configured and a model was selected
+        if (
+            lora_model
+            and self.model_selector
+            and self.model_selector.lora_header
+        ):
+            headers[self.model_selector.lora_header] = lora_model
 
         # Merge with existing headers (user headers take precedence)
         if existing_headers:
